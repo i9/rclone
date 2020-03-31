@@ -16,9 +16,9 @@ require (
 	github.com/billziss-gh/cgofuse v1.2.0
 	github.com/djherbis/times v1.2.0
 	github.com/dropbox/dropbox-sdk-go-unofficial v5.6.0+incompatible
-	github.com/google/go-querystring v1.0.0 // indirect
 	github.com/gopherjs/gopherjs v0.0.0-20190812055157-5d271430af9f // indirect
 	github.com/hanwen/go-fuse/v2 v2.0.3-0.20191108143333-152e6ac32d54
+	github.com/i9/amzauth v0.0.0-20200331161413-2fe0d98ed3c4 // indirect
 	github.com/jlaffaye/ftp v0.0.0-20191218041957-e1b8fdd0dcc3
 	github.com/jzelinskie/whirlpool v0.0.0-20170603002051-c19460b8caa6
 	github.com/kardianos/osext v0.0.0-20190222173326-2bc1f35cddc0 // indirect

@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/i9/amzauth"
 	acd "github.com/ncw/go-acd"
 	"github.com/pkg/errors"
 	"github.com/rclone/rclone/fs"
@@ -48,21 +49,6 @@ const (
 	defaultTempLinkThreshold = fs.SizeSuffix(9 << 30) // Download files bigger than this via the tempLink
 )
 
-// Globals
-var (
-	// Description of how to auth for this app
-	acdConfig = &oauth2.Config{
-		Scopes: []string{"clouddrive:read_all", "clouddrive:write"},
-		Endpoint: oauth2.Endpoint{
-			AuthURL:  "https://www.amazon.com/ap/oa",
-			TokenURL: "https://api.amazon.com/auth/o2/token",
-		},
-		ClientID:     "",
-		ClientSecret: "",
-		RedirectURL:  oauthutil.RedirectURL,
-	}
-)
-
 // Register with Fs
 func init() {
 	fs.Register(&fs.RegInfo{
@@ -71,27 +57,22 @@ func init() {
 		Description: "Amazon Drive",
 		NewFs:       NewFs,
 		Config: func(name string, m configmap.Mapper) {
-			err := oauthutil.Config("amazon cloud drive", name, m, acdConfig)
+			rt, ok := m.Get("refresh_token")
+			if !ok || rt == "" {
+				log.Fatalf("missing refresh_token in %+v", m)
+			}
+			err := oauthutil.PutToken(name, m, &oauth2.Token{
+				RefreshToken: rt,
+				AccessToken:  "my-access-token", // non-empty so oauthutil.GetToken work
+			}, true)
 			if err != nil {
 				log.Fatalf("Failed to configure token: %v", err)
 			}
 		},
 		Options: []fs.Option{{
-			Name:     config.ConfigClientID,
-			Help:     "Amazon Application Client ID.",
+			Name:     "refresh_token",
+			Help:     "Amazon Application Refresh Token.",
 			Required: true,
-		}, {
-			Name:     config.ConfigClientSecret,
-			Help:     "Amazon Application Client Secret.",
-			Required: true,
-		}, {
-			Name:     config.ConfigAuthURL,
-			Help:     "Auth server URL.\nLeave blank to use Amazon's.",
-			Advanced: true,
-		}, {
-			Name:     config.ConfigTokenURL,
-			Help:     "Token server url.\nleave blank to use Amazon's.",
-			Advanced: true,
 		}, {
 			Name:     "checkpoint",
 			Help:     "Checkpoint for internal polling (debug).",
@@ -166,7 +147,7 @@ type Fs struct {
 	dirCache     *dircache.DirCache // Map of directory path to directory id
 	pacer        *fs.Pacer          // pacer for API calls
 	trueRootID   string             // ID of true root directory
-	tokenRenewer *oauthutil.Renew   // renew the token on expiry
+	//	tokenRenewer *oauthutil.Renew   // renew the token on expiry
 }
 
 // Object describes a acd object
@@ -223,7 +204,7 @@ var retryErrorCodes = []int{
 func (f *Fs) shouldRetry(resp *http.Response, err error) (bool, error) {
 	if resp != nil {
 		if resp.StatusCode == 401 {
-			f.tokenRenewer.Invalidate()
+			// f.tokenRenewer.Invalidate()
 			fs.Debugf(f, "401 error received - invalidating token")
 			return true, err
 		}
@@ -272,9 +253,13 @@ func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
 	} else {
 		fs.Debugf(name+":", "Couldn't add request filter - large file downloads will fail")
 	}
-	oAuthClient, ts, err := oauthutil.NewClientWithBaseClient(name, m, acdConfig, baseClient)
+	tk, err := oauthutil.GetToken(name, m)
+	oAuthClient, newtk, err := amzauth.NewClient(tk, baseClient.Transport)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to configure Amazon Drive")
+	}
+	if newtk != nil {
+		oauthutil.PutToken(name, m, newtk, false)
 	}
 
 	c := acd.NewClient(oAuthClient)
@@ -292,11 +277,12 @@ func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
 		CanHaveEmptyDirectories: true,
 	}).Fill(f)
 
-	// Renew the token in the background
-	f.tokenRenewer = oauthutil.NewRenew(f.String(), ts, func() error {
-		_, err := f.getRootInfo()
-		return err
-	})
+	/*
+		// Renew the token in the background
+		f.tokenRenewer = oauthutil.NewRenew(f.String(), ts, func() error {
+			_, err := f.getRootInfo()
+			return err
+		})*/
 
 	// Update endpoints
 	var resp *http.Response
@@ -677,9 +663,9 @@ func (f *Fs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options .
 	var resp *http.Response
 	err = f.pacer.CallNoRetry(func() (bool, error) {
 		start := time.Now()
-		f.tokenRenewer.Start()
+		// f.tokenRenewer.Start()
 		info, resp, err = folder.Put(in, f.opt.Enc.FromStandardName(leaf))
-		f.tokenRenewer.Stop()
+		// f.tokenRenewer.Stop()
 		var ok bool
 		ok, info, err = f.checkUpload(ctx, resp, in, src, info, err, time.Since(start))
 		if ok {
@@ -1121,9 +1107,9 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 	var err error
 	err = o.fs.pacer.CallNoRetry(func() (bool, error) {
 		start := time.Now()
-		o.fs.tokenRenewer.Start()
+		//o.fs.tokenRenewer.Start()
 		info, resp, err = file.Overwrite(in)
-		o.fs.tokenRenewer.Stop()
+		//o.fs.tokenRenewer.Stop()
 		var ok bool
 		ok, info, err = o.fs.checkUpload(ctx, resp, in, src, info, err, time.Since(start))
 		if ok {
